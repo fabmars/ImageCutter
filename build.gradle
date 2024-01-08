@@ -1,0 +1,41 @@
+plugins {
+    id("java")
+}
+
+group = "org.mars"
+version = "1.0-SNAPSHOT"
+
+repositories {
+    mavenCentral()
+}
+
+def lombokVersion = '1.18.30'
+def slfVersion ='2.0.9'
+
+dependencies {
+    annotationProcessor("org.projectlombok:lombok:$lombokVersion")
+    compileOnly("org.projectlombok:lombok:$lombokVersion")
+
+    implementation("org.slf4j:slf4j-api:$slfVersion")
+    implementation("org.openpnp:opencv:4.8.1-0")
+
+    runtimeOnly("org.slf4j:slf4j-simple:$slfVersion")
+
+    testImplementation(platform("org.junit:junit-bom:5.9.1"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+}
+
+
+java {
+    sourceCompatibility = JavaVersion.toVersion("21")
+    targetCompatibility = JavaVersion.toVersion("21")
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = "UTF-8"
+    options.compilerArgs.add('-parameters')
+}
+
+tasks.test {
+    useJUnitPlatform()
+}
