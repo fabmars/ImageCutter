@@ -1,20 +1,11 @@
 package org.mars.cutter;
 
-import static org.mars.cutter.util.FileUtils.dotExtension;
-
-import java.awt.BasicStroke;
-import java.awt.Color;
-import java.awt.Graphics2D;
-import java.awt.image.BufferedImage;
 import java.awt.image.RescaleOp;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
-import javax.imageio.ImageIO;
 import lombok.extern.slf4j.Slf4j;
 import nu.pattern.OpenCV;
 import org.mars.cutter.domain.Bounds;
@@ -22,9 +13,6 @@ import org.mars.cutter.domain.HVHoughs;
 import org.mars.cutter.domain.Hough;
 import org.mars.cutter.domain.HoughFlock;
 import org.mars.cutter.domain.Outline;
-import org.mars.cutter.domain.Segment;
-import org.mars.cutter.util.FileUtils;
-import org.mars.cutter.util.ImageUtils;
 import org.opencv.core.Core;
 import org.opencv.core.Mat;
 import org.opencv.core.Point;
@@ -42,120 +30,18 @@ import org.opencv.imgproc.Imgproc;
 @Slf4j
 public class RectangleDetector {
 
-  public static final int TEMP_DIMENSION = 3000;
-  public static final int PIXEL_COUNT_THRESHOLD = TEMP_DIMENSION/10;
-  public static final double CANNY_THRESHOLD = 40.0;
-  public static final double CANNY_RATIO = 6.0; // Canny recommends 3 but a higher value works better in our case
-  public static final double HOUGH_THETA = Math.PI/(180*5);
-  public static final int HOUGH_THRESHOLD = 300; // higher threshold will reduce the amount of lines
-  public static final double HV_THRESHOLD = Math.PI / 180.0 * 0.75; // How much of an angle tolerance am I allowing to declare whether the line is horizontal or vertical
-  public static final DetectionParams DEFAULT_PARAMS = new DetectionParams(TEMP_DIMENSION, CANNY_THRESHOLD, CANNY_RATIO, HOUGH_THETA, HOUGH_THRESHOLD,
-      HV_THRESHOLD);
-
-  public static final String TEMP_FORMAT = "bmp";
-  public static final String DESTINATION_FORMAT = "jpg";
+  public static final int PIXEL_THRESHOLD_RATIO = 10;
   protected static final double[] CANNY_BLACK = {0.0, 0.0, 0.0};
   public static final Comparator<Hough> RHO_COMPARATOR = Comparator.comparing(Hough::getRho);
   public static final RescaleOp CONTRAST_ADJUSTMENT = new RescaleOp(1.f, 0.1f, null);
 
-  public RectangleDetector() {
+  static {
     //Loading the OpenCV core library
     OpenCV.loadShared();
     //System.loadLibrary(Core.NATIVE_LIBRARY_NAME);
   }
 
-  @Deprecated
-  public void process(Path file) throws IOException {
-    process(file, DEFAULT_PARAMS);
-  }
-
-  @Deprecated
-  public void process(Path file, DetectionParams params) throws IOException {
-    log.info("Processing: {}", file);
-    String[] fileExt = FileUtils.getFileExt(file);
-
-    Path tempFile = Files.createTempFile(null, dotExtension(fileExt[1]));
-    BufferedImage originalImage = ImageIO.read(file.toFile());
-    Size originalSize = new Size(originalImage.getWidth(), originalImage.getHeight());
-    BufferedImage scaledImage = ImageUtils.scaleBigger(originalImage, TEMP_DIMENSION, TEMP_DIMENSION, (img, infoflags, x, y, width, height) -> false);
-    //scaledImage = CONTRAST_ADJUSTMENT.filter(scaledImage, scaledImage);
-    ImageIO.write(scaledImage, TEMP_FORMAT, tempFile.toFile());
-
-    Outline outline = detectOutline(tempFile, params, originalSize);
-    log.info(outline.toString());
-    BufferedImage cannyImage = outline.toImage();
-
-    Path cannyFile = file.resolveSibling("canny-" + fileExt[0] + dotExtension(DESTINATION_FORMAT));
-    Files.deleteIfExists(cannyFile);
-    ImageIO.write(cannyImage, DESTINATION_FORMAT, cannyFile.toFile());
-
-    Path linedFile = file.resolveSibling("lined-" + fileExt[0] + dotExtension(DESTINATION_FORMAT));
-    Files.deleteIfExists(linedFile);
-    drawLines(cannyImage, outline, Color.red);
-    drawBounds(cannyImage, outline, Color.green);
-    //drawCorners(scaledImage, outline, Color.blue);
-    ImageIO.write(cannyImage, DESTINATION_FORMAT, linedFile.toFile());
-
-    Path resultFile = file.resolveSibling("result-" + fileExt[0] + dotExtension(DESTINATION_FORMAT));
-    Files.deleteIfExists(resultFile);
-    //drawLines(scaledImage, outline, Color.red);
-    drawBounds(scaledImage, outline, Color.green);
-    //drawCorners(scaledImage, outline, Color.blue);
-    ImageIO.write(scaledImage, DESTINATION_FORMAT, resultFile.toFile());
-
-    // cleanup
-    Files.delete(tempFile);
-  }
-
-
-  private static void drawLines(BufferedImage image, Outline outline, Color linesColor) {
-    Graphics2D g = (Graphics2D) image.getGraphics();
-    int width = image.getWidth();
-    int height = image.getHeight();
-
-    outline.hvHoughs().forEach(hough -> {
-      double theta = hough.getTheta();
-      double rho = hough.getRho();
-
-      double a = Math.cos(theta);
-      double b = Math.sin(theta);
-      double x0 = a * rho;
-      double y0 = b * rho;
-
-      // Drawing lines on the image. Majoring as if x0,y0 were in the center of a segment whose length is twice the image's diagonal.
-      // Hence, those coords will exceed the image bounds unless they are exactly vertical or horizontal.
-
-      g.setColor(linesColor);
-      g.setStroke(new BasicStroke(1));
-      int x1 = (int)Math.round(x0 - width * b);
-      int y1 = (int)Math.round(y0 + height * a);
-      int x2 = (int)Math.round(x0 + width * b);
-      int y2 = (int)Math.round(y0 - height * a);
-      g.drawLine(x1, y1, x2, y2);
-    });
-  }
-
-  private static void drawBounds(BufferedImage image, Outline outline, Color boundsColor) {
-    Graphics2D g = (Graphics2D) image.getGraphics();
-    g.setStroke(new BasicStroke(3));
-    g.setColor(boundsColor);
-    for (Bounds bound : outline.bounds()) {
-      for (Segment segment : bound.toSegments()) {
-        g.drawLine((int)segment.x1(), (int)segment.y1(), (int)segment.x2(),(int) segment.y2());
-      }
-    }
-  }
-
-  private static void drawCorners(BufferedImage image, Outline outline, Color cornersColor) {
-    Graphics2D g = (Graphics2D) image.getGraphics();
-    g.setColor(cornersColor);
-    for (Point corner : outline.corners()) {
-      g.drawOval((int)corner.x, (int)corner.y, 5, 5);
-    }
-  }
-
-
-  public Outline detectOutline(Path file, DetectionParams params, Size originalSize) {
+  public static Outline detectOutline(Path file, DetectionParams params, Size originalSize) {
     log.info("Identifying on: {}", file);
     Mat image = Imgcodecs.imread(file.toString());
     log.debug("Size: {}", image.size());
@@ -173,7 +59,7 @@ public class RectangleDetector {
 
     //Detecting the edges
     Mat edgesMat = new Mat();
-    Imgproc.Canny(grayMat, edgesMat, params.cannyThreshold(), params.cannyThreshold2(), 3, true);
+    Imgproc.Canny(grayMat, edgesMat, params.getCannyThreshold(), params.cannyThreshold2(), 3, true);
 
     // Changing the color of the canny
     Mat cannyMat = new Mat();
@@ -181,14 +67,14 @@ public class RectangleDetector {
 
     //Detecting the hough lines from (canny)
     Mat linesMat = new Mat();
-    Imgproc.HoughLines(edgesMat, linesMat, 1, params.houghTheta(), params.houghThreshold());
+    Imgproc.HoughLines(edgesMat, linesMat, 1, params.getHoughTheta(), params.getHoughThreshold());
 
     // filter horizontal/vertical lines
-    HVHoughs hvHoughs = filterCardinal(linesMat, params.hvAngleTolerance());
+    HVHoughs hvHoughs = filterCardinal(linesMat, params.getHvAngleTolerance());
     hvHoughs.forEach(hough -> log.debug(hough.toString()));
 
-    List<Bounds> bounds = findRectangles(cannyMat, hvHoughs, originalSize);
-    return new Outline(file, params, cannyMat, hvHoughs, List.of(), bounds);
+    List<Bounds> bounds = findRectangles(cannyMat, hvHoughs);
+    return new Outline(file, params, originalSize, cannyMat, hvHoughs, List.of(), bounds);
   }
 
   private static List<Point> findCorners(Mat grayMat, double thresholdRatio) {
@@ -241,14 +127,13 @@ public class RectangleDetector {
     return new HVHoughs(horizontalLines, verticalLines);
   }
 
-  private List<Bounds> findRectangles(Mat cannyMat, HVHoughs hvHoughs, Size originalSize) {
+  private static List<Bounds> findRectangles(Mat cannyMat, HVHoughs hvHoughs) {
     List<Bounds> bounds = new ArrayList<>();
 
     // giving preference to horizontal lines, grouping lines that are very close
     // so different horizontal flocks should be close to one photo boundary or the junction of 2 adjacent photos
     int height = cannyMat.rows();
     int width = cannyMat.cols();
-    double scale = Math.min(originalSize.width/width, originalSize.height/height);
     List<HoughFlock> h1Flocks = splitBands(hvHoughs.horizontals(), height);
 
     // Now that the pic is split in horizontal bands
@@ -288,7 +173,7 @@ public class RectangleDetector {
                 Hough photoTop = getBottomest(prevH2Flock, photoLeftX, photoRightX), photoBottom = getTopest(curH2Flock, photoLeftX, photoRightX);
                 // and finally outline rectangles from the crossing of each horizontal and vertical band
                 //TODO it may be bent a little bit, needs adjustment rotation
-                bounds.add(new Bounds(photoTop, photoBottom, photoLeft, photoRight, scale));
+                bounds.add(new Bounds(photoTop, photoBottom, photoLeft, photoRight));
               }
               prevH2Flock = curH2Flock;
             }
@@ -335,7 +220,7 @@ public class RectangleDetector {
     return verticalLines.stream()
         .filter(vLine -> {
           int litPixels = countVerticalLitPixels(canny, vLine, topY, bottomY);
-          if (litPixels >= PIXEL_COUNT_THRESHOLD) {
+          if (litPixels >= canny.height() / PIXEL_THRESHOLD_RATIO) {
             log.debug("Lit pixels on vertical line {}: {}", vLine, litPixels);
             return true;
           } else {
@@ -363,7 +248,7 @@ public class RectangleDetector {
     return horizontalLines.stream()
         .filter(hLine -> {
           int litPixels = countHorizontalLitPixels(canny, hLine, leftX, rightX);
-          if (litPixels >= PIXEL_COUNT_THRESHOLD) {
+          if (litPixels >= canny.width() / PIXEL_THRESHOLD_RATIO) {
             log.debug("Lit pixels on horizontal line {}: {}", hLine, litPixels);
             return true;
           } else {

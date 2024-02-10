@@ -248,14 +248,6 @@ public class ImageUtils {
   // ==============================================================================
   // ==============================================================================
 
-  public static void drawImage(Component c, Image image, Color backColor, int borderWidth, Color borderColor, boolean aspectRatio) {
-    drawImage(c.getGraphics(), c.getWidth(), c.getHeight(), image, backColor, borderWidth, borderColor, aspectRatio, c);
-  }
-
-  public static void drawImage(Component c, Image image, Color backColor, boolean aspectRatio) {
-    drawImage(c, image, backColor, 0, null, aspectRatio);
-  }
-
   public static void drawImage(Graphics g, int gWidth, int gHeight, Image image, Color backColor, boolean aspectRatio, ImageObserver obs) {
     drawImage(g, gWidth, gHeight, image, backColor, 0, null, aspectRatio, obs);
   }

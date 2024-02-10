@@ -1,7 +1,6 @@
 package org.mars.cutter.ui;
 
 import java.text.DecimalFormat;
-import java.text.ParseException;
 import javax.swing.JFormattedTextField;
 
 public class IntegerField extends JFormattedTextField {
@@ -10,5 +9,9 @@ public class IntegerField extends JFormattedTextField {
     super(new PositiveNumberFormatter(new DecimalFormat(format)));
     setColumns(columns);
     setValue(value);
+  }
+
+  public int getInt() {
+    return ((Number)getValue()).intValue();
   }
 }

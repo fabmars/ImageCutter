@@ -11,4 +11,8 @@ public class DoubleField extends JFormattedTextField {
     setColumns(columns);
     setValue(value);
   }
+
+  public double getDouble() {
+    return ((Number)getValue()).doubleValue();
+  }
 }

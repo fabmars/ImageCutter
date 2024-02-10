@@ -1,152 +1,143 @@
 package org.mars.cutter.ui;
 
+import static java.awt.event.InputEvent.CTRL_DOWN_MASK;
+import static org.mars.cutter.ui.SwingUtils.newGridBagConstraints;
+
 import java.awt.BorderLayout;
-import java.awt.Canvas;
-import java.awt.Component;
-import java.awt.FlowLayout;
-import java.awt.Graphics;
-import java.awt.GridLayout;
-import java.awt.Image;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
 import java.awt.KeyEventDispatcher;
 import java.awt.KeyboardFocusManager;
 import java.awt.event.KeyEvent;
-import java.awt.image.BufferedImage;
-import java.io.IOException;
-import java.nio.file.Path;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseMotionAdapter;
 import javax.swing.JButton;
 import javax.swing.JFrame;
-import javax.swing.JLabel;
-import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import lombok.extern.slf4j.Slf4j;
-import org.mars.cutter.CutterController;
-import org.mars.cutter.ImageLoadingException;
-import org.mars.cutter.RectangleDetector;
-import org.mars.cutter.util.ImageUtils;
+import org.mars.cutter.CutterService;
+import org.mars.cutter.DetectionParams;
+import org.opencv.core.Point;
 
 @Slf4j
 public class CutterDialog extends JFrame implements KeyEventDispatcher {
 
-  private final CutterController service;
-  private final JPanel mainPanel = new JPanel();
+  final JImage jImage;
+  final JControlsPanel jControlsPanel;
+  final JQuadrisPanel jQuadrisPanel;
+  final JLookingGlass jLookingGlass;
+  final CutterController controller;
+  final JQuadriResizer jQuadriResizer;
 
-
-  public CutterDialog(Path rootDir) throws IOException {
-    this.service = new CutterController(rootDir);
+  public CutterDialog(CutterService service) {
 
     setTitle("Image Cutter");
     setDefaultCloseOperation(DISPOSE_ON_CLOSE);
     KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(this);
 
-    setLayout(new BorderLayout());
+    setLayout(new GridBagLayout());
 
-    mainPanel.setLayout(new BorderLayout());
+    jImage = new JImage();
+    jQuadrisPanel = new JQuadrisPanel();
+    jLookingGlass = new JLookingGlass();
+    jControlsPanel = new JControlsPanel(DetectionParams.DEFAULTS);
+    controller = new CutterController(service, this);
 
-    JPanel rectanglesPanel = new JPanel();
-    rectanglesPanel.setLayout(new GridLayout(8, 1));
-    rectanglesPanel.add(new JRectangle("Rectangle 1"));
-    rectanglesPanel.add(new JRectangle("Rectangle 2"));
-    rectanglesPanel.add(new JRectangle("Rectangle 3"));
-    rectanglesPanel.add(new JRectangle("Rectangle 4"));
-    rectanglesPanel.add(new JRectangle("Rectangle 5"));
+    JPanel rightPanel = new JPanel();
+    rightPanel.setLayout(new BorderLayout());
+    JButton addRectButton = new JButton("➕");
+    addRectButton.addActionListener(l -> controller.addGenericQuadri());
+    rightPanel.add(addRectButton, BorderLayout.NORTH);
 
-    add(createButtonsPanel(), BorderLayout.NORTH);
-    add(mainPanel, BorderLayout.CENTER);
-    add(rectanglesPanel, BorderLayout.EAST);
-  }
+    rightPanel.add(jQuadrisPanel, BorderLayout.CENTER);
+    rightPanel.add(jLookingGlass, BorderLayout.SOUTH);
 
-  private JPanel createButtonsPanel() {
-    JLabel cannyThresholdLabel = new JLabel("C.thresh");
-    DoubleField cannyThresholdInput = new DoubleField("#.###", 5, RectangleDetector.CANNY_THRESHOLD);
-    JLabel cannyRatioLabel = new JLabel("C.ratio");
-    DoubleField cannyRatioInput = new DoubleField("#.###", 5, RectangleDetector.CANNY_RATIO);
-    JLabel houghThresholdLabel = new JLabel("H.thresh");
-    IntegerField houghThresholdInput = new IntegerField("#", 4, RectangleDetector.HOUGH_THRESHOLD);
-    JLabel angleThresholdLabel = new JLabel("A.thresh");
-    DoubleField angleThresholdInput = new DoubleField("#.################", 8, RectangleDetector.HV_THRESHOLD);
-
-    JButton resetButton = new JButton("Reset");
-    resetButton.addActionListener(e -> reset());
-    JButton skipButton = new JButton("Skip");
-    skipButton.addActionListener(e -> skip());
-    JButton confirmButton = new JButton("Validate");
-    confirmButton.addActionListener(e -> confirm());
-
-    JPanel buttonsPanel = new JPanel();
-    buttonsPanel.setLayout(new FlowLayout(FlowLayout.RIGHT));
-    buttonsPanel.add(cannyThresholdLabel);
-    buttonsPanel.add(cannyThresholdInput);
-    buttonsPanel.add(cannyRatioLabel);
-    buttonsPanel.add(cannyRatioInput);
-    buttonsPanel.add(houghThresholdLabel);
-    buttonsPanel.add(houghThresholdInput);
-    buttonsPanel.add(angleThresholdLabel);
-    buttonsPanel.add(angleThresholdInput);
-    buttonsPanel.add(resetButton);
-    buttonsPanel.add(skipButton);
-    buttonsPanel.add(confirmButton);
-    return buttonsPanel;
-  }
+    add(jControlsPanel, newGridBagConstraints(0, 0, 2, 1, 1, 0.01, GridBagConstraints.EAST, GridBagConstraints.HORIZONTAL));
+    GridBagConstraints constraints = newGridBagConstraints(0, 1, 1, 1, 0.9, 0.99, GridBagConstraints.CENTER, GridBagConstraints.BOTH);
+    add(jImage, constraints);
+    add(rightPanel, newGridBagConstraints(1, 1, 1, 1, 0.1, 0.99, GridBagConstraints.NORTHEAST, GridBagConstraints.NONE));
 
 
-  public void reset() {
-    try {
-      BufferedImage image = service.reset();
-      setImage(image);
-    } catch (ImageLoadingException e) {
-      JOptionPane.showMessageDialog(this, "Couldn't reset: " + e.getMessage());
-      skip();
-    }
+    jControlsPanel.resetButton.addActionListener(e -> controller.reset());
+    jControlsPanel.skipButton.addActionListener(e -> controller.skip());
+    jControlsPanel.confirmButton.addActionListener(e -> controller.confirm());
+
+    jImage.addMouseOperationsListener(new JQuadriDragger(controller));
+    jQuadriResizer = new JQuadriResizer(controller);
+    jImage.addMouseOperationsListener(jQuadriResizer);
+    jImage.addMouseMotionListener(new MouseMotionAdapter() {
+      @Override
+      public void mouseMoved(MouseEvent e) {
+        controller.centerOn(e.getPoint());
+      }
+    });
   }
 
   public void skip() {
-    try {
-      BufferedImage image = service.skip();
-      if (image == null) {
-        JOptionPane.showConfirmDialog(this, "Finsihed!");
-        setVisible(false);
-      } else {
-        setImage(image);
-      }
-    } catch (ImageLoadingException e) {
-      JOptionPane.showMessageDialog(this, "Couldn't skip: " + e.getMessage());
-      skip();
-    }
-  }
-
-  public void confirm() {
-    try {
-      BufferedImage image = service.confirm();
-      setImage(image);
-    } catch (ImageLoadingException e) {
-      JOptionPane.showMessageDialog(this, "Couldn't confirm: " + e.getMessage());
-      skip();
-    }
-  }
-
-
-
-  public void setImage(Image image) {
-    Canvas imageCanvas = new Canvas() {
-      @Override
-      public void paint(Graphics g) {
-        ImageUtils.drawImage(this, image, null, true);
-      }
-    };
-    mainPanel.removeAll();
-    mainPanel.add(imageCanvas, BorderLayout.CENTER);
-    mainPanel.validate();
+    controller.skip();
   }
 
   @Override
   public boolean dispatchKeyEvent(KeyEvent e) {
     if (e.getID() == KeyEvent.KEY_RELEASED) {
-      Component source = e.getComponent();
+      int keyCode = e.getKeyCode();
+      if ((e.getModifiersEx() & CTRL_DOWN_MASK) == CTRL_DOWN_MASK && keyCode == KeyEvent.VK_N) {
+        controller.addGenericQuadri();
+        return true;
+      }
 
-      int key = e.getKeyCode();
-      log.info("Pressed: {}", key);
-      return true;
+      if ((e.getModifiersEx() & CTRL_DOWN_MASK) == CTRL_DOWN_MASK && keyCode == KeyEvent.VK_S) {
+        controller.confirm();
+        return true;
+      }
+
+      // Reorder quadris
+      if ((e.getModifiersEx() & CTRL_DOWN_MASK) == CTRL_DOWN_MASK && keyCode == KeyEvent.VK_UP) {
+        controller.upSelectedRectangle();
+        return true;
+      }
+
+      if ((e.getModifiersEx() & CTRL_DOWN_MASK) == CTRL_DOWN_MASK && keyCode == KeyEvent.VK_DOWN) {
+        controller.downSelectedRectangle();
+        return true;
+      }
+
+      // Select quadris
+      if ((keyCode >= KeyEvent.VK_F1 && keyCode <= KeyEvent.VK_F12)) {
+        controller.setSelectedRectangle(keyCode - KeyEvent.VK_F1);
+        return true;
+      }
+
+      if (keyCode == KeyEvent.VK_SPACE) {
+        jQuadriResizer.pinpointCorner();
+        return true;
+      }
+    } else if(e.getID() == KeyEvent.KEY_PRESSED) {
+      int keyCode = e.getKeyCode();
+      Point imageCoords = controller.getMousePointer();
+
+      if (keyCode == KeyEvent.VK_LEFT) {
+        imageCoords.x--;
+        controller.centerOn(imageCoords);
+        return true;
+      }
+      if (keyCode == KeyEvent.VK_RIGHT) {
+        imageCoords.x++;
+        controller.centerOn(imageCoords);
+        return true;
+      }
+      if (keyCode == KeyEvent.VK_UP) {
+        imageCoords.y--;
+        controller.centerOn(imageCoords);
+        return true;
+      }
+      if (keyCode == KeyEvent.VK_DOWN) {
+        imageCoords.y++;
+        controller.centerOn(imageCoords);
+        return true;
+      }
     }
+
     return false;
   }
 }
